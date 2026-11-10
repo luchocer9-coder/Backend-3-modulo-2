@@ -1,6 +1,6 @@
 # ShipNow API
 
-API REST con Node.js, Express y MongoDB para gestionar usuarios y productos, organizada en arquitectura de capas.
+API REST con Node.js, Express y MongoDB para gestionar usuarios, productos, pedidos y entregas, organizada en arquitectura de capas.
 
 ## Cómo correr el proyecto
 
@@ -20,35 +20,106 @@ API REST con Node.js, Express y MongoDB para gestionar usuarios y productos, org
 
 Si falta una variable obligatoria, la aplicación muestra cuál es y no arranca.
 
-## Endpoints
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/api/health` | Verifica que el servidor esté activo |
-| GET | `/api/products` | Lista productos disponibles |
-| GET | `/api/products/:id` | Obtiene un producto |
-| POST | `/api/products` | Crea un producto |
-| PUT | `/api/products/:id` | Actualiza un producto |
-| DELETE | `/api/products/:id` | Elimina un producto |
-| GET | `/api/users` | Lista usuarios |
-| GET | `/api/users/:id` | Obtiene un usuario |
-| POST | `/api/users` | Crea un usuario |
-| PUT | `/api/users/:id` | Actualiza un usuario |
-| DELETE | `/api/users/:id` | Elimina un usuario |
-
 ## Arquitectura
 
 El flujo es `Router → Controller → Service → Repository → Model`.
 
 - **Controller:** recibe la petición HTTP y devuelve la respuesta con su status code.
 - **Service:** contiene las reglas de negocio.
-- **Repository:** es la única capa que usa los modelos de Mongoose para acceder a MongoDB.
+- **Repository:** es la única capa que usa Mongoose para acceder a MongoDB.
+
+Los roles, estados y prioridades están definidos en `src/constants/index.js`.
+
+## Mocking y datos de prueba
+
+El módulo de mocking usa [Faker](https://fakerjs.dev/) para generar datos simulados con la misma estructura que los modelos reales. Todos los endpoints aceptan `qty`, un número entero entre 1 y 100. Si no se envía, se generan 5 registros.
+
+### Datos que se pueden generar
+
+| Entidad | Datos | Reglas |
+|---|---|---|
+| Usuarios | `name`, `email`, `role` | Rol `USER` (cliente) o `DRIVER` (repartidor) |
+| Repartidores | Usuarios con rol `DRIVER` | No son una colección aparte |
+| Pedidos | `user`, `address`, `total`, `status`, `priority` | Pertenecen a un usuario con rol `USER` |
+| Entregas | `order`, `driver`, `status`, `deliveredAt` | Pertenecen a un pedido y solo tienen repartidor si están asignadas, en camino o entregadas |
+
+El estado de cada entrega depende del estado de su pedido:
+
+| Pedido | Entrega | ¿Tiene repartidor? |
+|---|---|---|
+| `PENDING` | `PENDING_ASSIGNMENT` | No |
+| `PREPARING` | `ASSIGNED` | Sí |
+| `SHIPPED` | `IN_TRANSIT` | Sí |
+| `DELIVERED` | `DELIVERED` | Sí |
+| `CANCELLED` | `CANCELLED` | No |
+
+### Endpoints que no guardan datos
+
+| Método | Ruta | Devuelve |
+|---|---|---|
+| GET | `/api/mocks/users?qty=2` | Usuarios con rol `USER` o `DRIVER` |
+| GET | `/api/mocks/drivers?qty=2` | Repartidores |
+| GET | `/api/mocks/dataset?qty=4` | Usuarios, pedidos y entregas relacionados entre sí |
+
+Ejemplo de `GET /api/mocks/users?qty=2`:
+
+```json
+[
+  { "_id": "6af3...", "name": "Ana Pérez", "email": "ana.perez.x7k2p@test.com", "role": "USER" },
+  { "_id": "6af3...", "name": "Luis Gómez", "email": "luis.gomez.9qw3e@test.com", "role": "DRIVER" }
+]
+```
+
+Las claves están en inglés porque coinciden con los campos de los modelos reales.
+
+### Carga de datos de prueba en MongoDB
+
+| Método | Ruta | Inserta |
+|---|---|---|
+| POST | `/api/mocks/seed?qty=10` | Usuarios en la colección `users` |
+| POST | `/api/mocks/seed/dataset?qty=6` | Usuarios, pedidos y entregas relacionados |
+
+Ejemplos de respuesta:
+
+```json
+{ "insertados": 10, "coleccion": "users" }
+```
+
+```json
+{ "insertados": { "users": 5, "orders": 6, "deliveries": 6 } }
+```
+
+En `seed/dataset`, `qty` es la cantidad de pedidos. Se generan además `qty / 2` clientes y `qty / 3` repartidores, redondeando hacia arriba, y una entrega por pedido.
+
+La carga está controlada:
+
+- `qty` tiene que estar entre 1 y 100. Si no, la API responde `400`.
+- No se permite cuando `NODE_ENV=production`. En ese caso, la API responde `403`.
+- Todos los usuarios cargados tienen la contraseña `mock1234`, guardada encriptada.
+
+### Cómo probarlo en PowerShell
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/api/mocks/users?qty=2"
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/mocks/seed?qty=10"
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/mocks/seed/dataset?qty=6"
+```
+
+## Otros endpoints
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/health` | Verifica que el servidor esté activo |
+| GET, POST | `/api/products` | Lista productos disponibles o crea uno |
+| GET, PUT, DELETE | `/api/products/:id` | Obtiene, actualiza o elimina un producto |
+| GET, POST | `/api/users` | Lista usuarios o crea uno |
+| GET, PUT, DELETE | `/api/users/:id` | Obtiene, actualiza o elimina un usuario |
 
 ## Por qué separé Service y Repository
 
-Separé estas capas para que las reglas de negocio no dependan de cómo se guardan los datos. El Service decide qué debe pasar, y el Repository resuelve cómo buscarlo o guardarlo.
+El Service decide qué debe pasar y el Repository resuelve cómo buscarlo o guardarlo.
 
-- **En el Service:** listar solo productos disponibles, calcular el estado según el stock, validar y encriptar la contraseña, asignar el rol inicial y avisar si un registro no existe.
-- **En el Repository:** consultar y guardar datos, definir qué campos se devuelven y ordenar los resultados.
+- **En el Service:** listar solo productos disponibles, calcular estados, encriptar contraseñas, generar los datos de prueba, mantener las relaciones entre entidades y validar cuántos registros se pueden cargar.
+- **En el Repository:** consultar e insertar datos, definir qué campos se devuelven y generar los ids de MongoDB.
 
 Así, si cambia la forma de acceder a los datos, las reglas de negocio no deberían cambiar.
