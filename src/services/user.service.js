@@ -1,17 +1,24 @@
 import bcrypt from 'bcryptjs';
 import { userRepository } from '../repositories/user.repository.js';
 import { USER_ROLES } from '../constants/index.js';
-import { AppError } from '../utils/app-error.js';
+import {
+  InvalidIdError,
+  UserNotFoundError,
+  InvalidPasswordError,
+} from '../errors/custom-errors.js';
 
 const MIN_PASSWORD_LENGTH = 8;
 const SALT_ROUNDS = 10;
 
+const ensureValidId = (id) => {
+  if (!userRepository.isValidId(id)) {
+    throw new InvalidIdError(id);
+  }
+};
+
 const hashPassword = async (password) => {
   if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
-    throw new AppError(
-      `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`,
-      400,
-    );
+    throw new InvalidPasswordError(MIN_PASSWORD_LENGTH);
   }
 
   return bcrypt.hash(password, SALT_ROUNDS);
@@ -23,16 +30,17 @@ class UserService {
   }
 
   async getById(id) {
+    ensureValidId(id);
     const user = await userRepository.getById(id);
 
     if (!user) {
-      throw new AppError('Usuario no encontrado', 404);
+      throw new UserNotFoundError(id);
     }
 
     return user;
   }
 
-  async create(data) {
+  async create(data = {}) {
     const password = await hashPassword(data.password);
 
     return userRepository.create({
@@ -42,7 +50,8 @@ class UserService {
     });
   }
 
-  async update(id, data) {
+  async update(id, data = {}) {
+    ensureValidId(id);
     const { role, ...changes } = data;
 
     if (changes.password !== undefined) {
@@ -52,17 +61,18 @@ class UserService {
     const updatedUser = await userRepository.update(id, changes);
 
     if (!updatedUser) {
-      throw new AppError('Usuario no encontrado', 404);
+      throw new UserNotFoundError(id);
     }
 
     return updatedUser;
   }
 
   async delete(id) {
+    ensureValidId(id);
     const deletedUser = await userRepository.delete(id);
 
     if (!deletedUser) {
-      throw new AppError('Usuario no encontrado', 404);
+      throw new UserNotFoundError(id);
     }
 
     return deletedUser;

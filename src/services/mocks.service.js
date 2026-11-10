@@ -8,9 +8,16 @@ import {
   ORDER_PRIORITY,
   DELIVERY_STATUS,
 } from '../constants/index.js';
-import { AppError } from '../utils/app-error.js';
+import {
+  AppError,
+  InvalidMockQuantityError,
+  NegativeMockQuantityError,
+  MockSeedForbiddenError,
+  MockSeedError,
+} from '../errors/custom-errors.js';
 
 const DEFAULT_QTY = 5;
+const MIN_QTY = 1;
 const MAX_QTY = 100;
 const MOCK_PASSWORD = 'mock1234';
 const SALT_ROUNDS = 10;
@@ -37,8 +44,16 @@ const parseQty = (qty) => {
 
   const value = Number(qty);
 
-  if (!Number.isInteger(value) || value < 1 || value > MAX_QTY) {
-    throw new AppError(`qty debe ser un número entero entre 1 y ${MAX_QTY}`, 400);
+  if (Array.isArray(qty) || qty === '' || Number.isNaN(value)) {
+    throw new InvalidMockQuantityError(qty, MIN_QTY, MAX_QTY);
+  }
+
+  if (value < 0) {
+    throw new NegativeMockQuantityError(value);
+  }
+
+  if (!Number.isInteger(value) || value < MIN_QTY || value > MAX_QTY) {
+    throw new InvalidMockQuantityError(value, MIN_QTY, MAX_QTY);
   }
 
   return value;
@@ -102,7 +117,18 @@ const withPassword = async (users) => {
 
 const ensureSeedAllowed = () => {
   if (config.nodeEnv === 'production') {
-    throw new AppError('La carga de datos de prueba no está permitida en producción', 403);
+    throw new MockSeedForbiddenError();
+  }
+};
+
+// Traduce cualquier falla de MongoDB en un error controlado del dominio
+const runSeed = async (seed) => {
+  try {
+    return await seed();
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    console.error(error);
+    throw new MockSeedError(error.code === 11000 ? 'DUPLICATE_KEY' : error.name);
   }
 };
 
@@ -121,10 +147,10 @@ class MocksService {
     return generateDataset(parseQty(qty));
   }
 
-  async seedUsers(qty) {
+    async seedUsers(qty) {
     ensureSeedAllowed();
     const users = await withPassword(this.getUsers(qty));
-    const inserted = await mocksRepository.insertUsers(users);
+    const inserted = await runSeed(() => mocksRepository.insertUsers(users));
     return { insertados: inserted, coleccion: 'users' };
   }
 
@@ -132,7 +158,7 @@ class MocksService {
     ensureSeedAllowed();
     const dataset = generateDataset(parseQty(qty));
     const users = await withPassword(dataset.users);
-    const inserted = await mocksRepository.insertDataset({ ...dataset, users });
+    const inserted = await runSeed(() => mocksRepository.insertDataset({ ...dataset, users }));
     return { insertados: inserted };
   }
 }

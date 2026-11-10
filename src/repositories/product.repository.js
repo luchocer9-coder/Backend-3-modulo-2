@@ -1,8 +1,13 @@
+import mongoose from 'mongoose';
 import { ProductModel } from '../models/product.model.js';
 
 const PUBLIC_FIELDS = 'name price stock status';
 
 class ProductRepository {
+  isValidId(id) {
+    return mongoose.isObjectIdOrHexString(id);
+  }
+
   async getAll(filters = {}) {
     return ProductModel.find(filters)
       .select(PUBLIC_FIELDS)
@@ -10,12 +15,11 @@ class ProductRepository {
       .lean();
   }
 
-
   async getById(id) {
-  return ProductModel.findById(id)
-    .select(PUBLIC_FIELDS)
-    .lean();
-}
+    return ProductModel.findById(id)
+      .select(PUBLIC_FIELDS)
+      .lean();
+  }
 
   async create(data) {
     const product = await ProductModel.create(data);

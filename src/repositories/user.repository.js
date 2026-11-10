@@ -1,8 +1,13 @@
+import mongoose from 'mongoose';
 import { UserModel } from '../models/user.model.js';
 
 const PUBLIC_FIELDS = 'name email role';
 
 class UserRepository {
+  isValidId(id) {
+    return mongoose.isObjectIdOrHexString(id);
+  }
+
   async getAll(filters = {}) {
     return UserModel.find(filters)
       .select(PUBLIC_FIELDS)
